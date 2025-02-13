@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Query Gemini with S3 Context</title>
+</head>
+<body>
+    <h1>Query Gemini with S3 Context</h1>
+    <input type="text" id="queryInput" placeholder="Enter your query here" style="width:80%">
+
+    <button onclick="sendQuery()" style="margin-top: 10px;">Ask Gemini</button>
+    <br/><br/>
+
+    <!-- Dropdown Menu -->
+     Project to query: 
+    <select id="dropdownOptions" style="margin-top: 10px;">
+        <option value="scooters-coffee">Scooter's Coffee</option>
+        <option value="townplace-suites">Townplace Suites</option>
+    </select>
+
+    <div id="responseArea" style="margin-top: 20px; border: 1px solid #ccc; padding: 10px; white-space: pre-wrap;">
+        </div>
+
+    <script>
+        async function sendQuery() {
+            const query = document.getElementById('queryInput').value;
+            const dropdownValue = document.getElementById('dropdownOptions').value; // Get dropdown value
+
+            if (!query) {
+                alert("Please enter a query.");
+                return;
+            }
+
+            const responseArea = document.getElementById('responseArea');
+            responseArea.textContent = "Loading response...";
+
+            try {
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query: query, location: dropdownValue }) // Send dropdown value in POST body
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                responseArea.textContent = data.response;
+
+            } catch (error) {
+                responseArea.textContent = `Error: ${error.message}`;
+                console.error("Error sending query:", error);
+            }
+        }
+    </script>
+</body>
+</html>
