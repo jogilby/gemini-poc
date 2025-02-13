@@ -7,6 +7,8 @@ import google.cloud.documentai_v1 as documentai
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+from io import BytesIO
+from pypdf import PdfReader, PdfWriter
 
 load_dotenv()
 
@@ -80,7 +82,7 @@ def load_text_from_s3(s3_client, s3_bucket_name, pdf_key):
 def fetch_pdf_text_from_s3_document_ai(project_location):
     """
     Fetches text content from all PDF files within a specified folder in the S3 bucket,
-    using saved text if available.
+    processes them page by page using Document AI, using saved text if available.
 
     Args:
         project_location (str): The folder path (prefix) in the S3 bucket to search within.
@@ -103,14 +105,29 @@ def fetch_pdf_text_from_s3_document_ai(project_location):
                         print(f"Using saved text from S3 for: {pdf_key}")
                         pdf_texts.append(saved_text)
                     else:
-                        print(f"Extracting text from PDF using Document AI: {pdf_key}")
+                        print(f"Extracting text from PDF page by page using Document AI: {pdf_key}")
                         try:
                             pdf_file_bytes = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=pdf_key)['Body'].read()
-                            extracted_text = process_pdf_with_document_ai(pdf_file_bytes)
+
+                            pdf_reader = PdfReader(BytesIO(pdf_file_bytes))
+                            extracted_text_pages = []
+                            for page_num in range(len(pdf_reader.pages)):
+                                page = pdf_reader.pages[page_num]
+                                # Extract content of each page to bytes
+                                with BytesIO() as page_bytes_stream:
+                                    writer = PdfWriter()  # Create a NEW PdfWriter object here                                    
+                                    writer.add_page(page)
+                                    writer.write(page_bytes_stream)
+                                    page_content_bytes = page_bytes_stream.getvalue()
+
+                                page_text = process_pdf_with_document_ai(page_content_bytes) # Process each page as PDF bytes
+                                extracted_text_pages.append(page_text)
+
+                            extracted_text = "\n".join(extracted_text_pages) # Join text from all pages
                             pdf_texts.append(extracted_text)
                             save_text_to_s3(s3_client, S3_BUCKET_NAME, pdf_key, extracted_text) # Save text to S3
                         except Exception as e:
-                            print(f"Error processing {pdf_key} with Document AI: {e}")
+                            print(f"Error processing {pdf_key} with Document AI page by page: {e}")
                 else:
                     print(f"Skipping non-PDF file: {pdf_key}") # Added logging for non-PDF files
         else:
@@ -120,7 +137,7 @@ def fetch_pdf_text_from_s3_document_ai(project_location):
     return "\n".join(pdf_texts)
 
 def process_pdf_with_document_ai(file_content: bytes) -> str:
-    """Processes a single PDF file content using Google Document AI and returns extracted text."""
+    """Processes a single PDF file content (or a page) using Google Document AI and returns extracted text."""
     # Instantiates a client
     document_ai_client = documentai.DocumentProcessorServiceClient()
     # The full resource name of the processor, e.g.:
