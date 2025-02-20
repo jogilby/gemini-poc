@@ -47,10 +47,24 @@ resource "aws_iam_policy" "ecs_task_execution_policy" {
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
+          "logs:PutLogEvents",
+          "elasticloadbalancing:RegisterTargets", 
+          "elasticloadbalancing:DeregisterTargets", 
+          "elasticloadbalancing:DescribeTargetGroups", 
+          "elasticloadbalancing:DescribeTargetHealth",
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket"
         ],
         Effect   = "Allow",
         Resource = "*"
+      },
+      {
+        Action = [
+          "secretsmanager:GetSecretValue"  # Added for Secrets Manager access
+        ],
+        Effect   = "Allow",
+        Resource = "*" # Grant access to your specific secret
       },
     ]
   })
@@ -60,6 +74,26 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy_attachment"
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = aws_iam_policy.ecs_task_execution_policy.arn
 }
+
+# --- CloudWatch ----
+# Create CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "ecs_logs" {
+  name              = var.cloudwatch_log_group_name 
+  retention_in_days = 30  # Adjust retention period as needed
+}
+
+# --- Secrets Manager ---
+#resource "aws_secretsmanager_secret" "google_service_account_key" {
+#    name = "google-service-account-key-prod" # Or a dynamic name using variables      
+#    force_overwrite_replica_secret = true
+#    recovery_window_in_days        = 0
+#    description = "Google Service Account key for production"
+#}
+
+#resource "aws_secretsmanager_secret_version" "google_service_account_key_version" {
+#      secret_id     = aws_secretsmanager_secret.google_service_account_key.id
+#      secret_string = file("~/Documents/Next/Keys/sa-gemini-poc-0939-key.json")       
+#}
 
 # --- Security Groups ---
 resource "aws_security_group" "alb_sg" {
@@ -176,8 +210,17 @@ resource "aws_ecs_task_definition" "app_task_definition" {
         { name = "GEMINI_API_KEY", value = var.gemini_api_key },
         { name = "GOOGLE_CLOUD_PROJECT_ID", value = var.google_cloud_project_id },
         { name = "GOOGLE_DOCUMENT_AI_PROCESSOR_ID", value = var.google_document_ai_processor_id },
-        { name = "GOOGLE_DOCUMENT_AI_PROCESSOR_LOCATION", value = var.google_document_ai_processor_location }
-      ]
+        { name = "GOOGLE_DOCUMENT_AI_PROCESSOR_LOCATION", value = var.google_document_ai_processor_location },
+        { name = "GOOGLE_SERVICE_ACCOUNT_SECRET_NAME", value = var.google_service_account_secret_name }
+      ],
+      logConfiguration = { 
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.cloudwatch_log_group_name # Use variable for log group name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs" # Prefix for log streams
+        }
+      }
     }
   ])
 }
@@ -189,6 +232,7 @@ resource "aws_ecs_service" "app_service" {
   desired_count   = var.desired_task_count
   launch_type     = "FARGATE"
   network_configuration {
+    assign_public_ip = true
     subnets          = var.private_subnet_ids
     security_groups = [aws_security_group.ecs_tasks_sg.id]
   }
@@ -200,13 +244,3 @@ resource "aws_ecs_service" "app_service" {
   depends_on = [aws_alb_target_group.app_target_group]
 }
 # --- End ECS Module ---
-
-
-output "alb_dns" {
-  value = aws_alb.application_load_balancer.dns_name
-}
-
-output "application_url" {
-  value       = "http://${aws_alb.application_load_balancer.dns_name}"
-  description = "URL to access the FastAPI application"
-}

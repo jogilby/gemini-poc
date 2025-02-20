@@ -7,8 +7,10 @@ import google.cloud.documentai_v1 as documentai
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+import json
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
+import google.oauth2.service_account
 
 load_dotenv()
 
@@ -31,6 +33,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def read_root():
     return FileResponse('static/index.html')
 
+
+# Serve index.html from the root path
+@app.get("/start")
+async def read_root():
+    return FileResponse('static/start.html')
+
 # Configure AWS, Gemini API and Google Cloud Document AI credentials
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -42,6 +50,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT_ID")
 PROCESSOR_ID = os.getenv("GOOGLE_DOCUMENT_AI_PROCESSOR_ID")
 PROCESSOR_LOCATION = os.getenv("GOOGLE_DOCUMENT_AI_PROCESSOR_LOCATION")
+GOOGLE_SERVICE_ACCOUNT_SECRET_NAME = os.getenv("GOOGLE_SERVICE_ACCOUNT_SECRET_NAME")
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.0-flash')
@@ -54,6 +63,31 @@ def get_s3_client():
         aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
         region_name=AWS_REGION_NAME
     )
+def get_secretmanager_client():
+    """Creates and returns a secretmanager client."""
+    return boto3.client(
+        'secretsmanager',
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        region_name=AWS_REGION_NAME
+    )
+
+# setup Google credentials for Document AI 
+try:
+        
+    service_account_key_json_str = get_secretmanager_client().get_secret_value(SecretId=GOOGLE_SERVICE_ACCOUNT_SECRET_NAME)    
+    if service_account_key_json_str:
+        super_secret = service_account_key_json_str['SecretString']
+        google_service_account_info = json.loads(str(super_secret))
+    else:
+        google_service_account_info = None
+        print("Warning: google-service-account-key-prod secret not parsed. Falling back to default credentials.")
+        # You might choose to raise an exception here in production if the key is mandatory
+        # raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON_KEY environment variable not set.")
+except Exception as e:
+    print(f"Error loading Google Service Account key: {e}")
+    # Handle error appropriately - maybe raise HTTPException or use default credentials if possible
+
 
 def save_text_to_s3(s3_client, s3_bucket_name, pdf_key, text_content):
     """Saves extracted text content to S3 as a .txt file."""
@@ -93,26 +127,37 @@ def fetch_pdf_text_from_s3_document_ai(project_location):
     s3_client = get_s3_client()
     pdf_texts = []
     try:
+         # Instantiates a client
+        if google_service_account_info: # Use service account credentials if available
+            try:
+                document_ai_client = documentai.DocumentProcessorServiceClient.from_service_account_info(google_service_account_info)
+            except Exception as e:
+                print(f"Error creating Document AI client with service account: {e}")
+                raise HTTPException(status_code=500, detail=f"Error creating Document AI client with service account: {e}")
+        else: # Fallback to default credentials (e.g., for local dev if ADC is configured)
+            print("Using default Google Cloud credentials for Document AI client.")
+            document_ai_client = documentai.DocumentProcessorServiceClient()
         # List objects in S3 bucket with the given prefix (project_location)
         response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix=project_location)
         if 'Contents' in response:
             for obj in response['Contents']:
                 pdf_key = obj['Key']
-                if pdf_key.lower().endswith('.pdf'):
-                    print(f"Processing PDF: {pdf_key}")
+                if pdf_key.lower().endswith('.pdf'):                    
                     saved_text = load_text_from_s3(s3_client, S3_BUCKET_NAME, pdf_key)
                     if saved_text:
                         print(f"Using saved text from S3 for: {pdf_key}")
                         pdf_texts.append(saved_text)
                     else:
-                        print(f"Extracting text from PDF page by page using Document AI: {pdf_key}")
+                        print(f"Extracting text from PDF page by page using Document AI: {pdf_key}", flush=True)
                         try:
                             pdf_file_bytes = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=pdf_key)['Body'].read()
 
                             pdf_reader = PdfReader(BytesIO(pdf_file_bytes))
+                            page_count = len(pdf_reader.pages)
                             extracted_text_pages = []
-                            for page_num in range(len(pdf_reader.pages)):
+                            for page_num in range(page_count):
                                 page = pdf_reader.pages[page_num]
+                                print(f"Extracting from {page_num} of {page_count} pages")
                                 # Extract content of each page to bytes
                                 with BytesIO() as page_bytes_stream:
                                     writer = PdfWriter()  # Create a NEW PdfWriter object here                                    
@@ -120,7 +165,7 @@ def fetch_pdf_text_from_s3_document_ai(project_location):
                                     writer.write(page_bytes_stream)
                                     page_content_bytes = page_bytes_stream.getvalue()
 
-                                page_text = process_pdf_with_document_ai(page_content_bytes) # Process each page as PDF bytes
+                                page_text = process_pdf_with_document_ai(page_content_bytes, document_ai_client) # Process each page as PDF bytes
                                 extracted_text_pages.append(page_text)
 
                             extracted_text = "\n".join(extracted_text_pages) # Join text from all pages
@@ -136,10 +181,9 @@ def fetch_pdf_text_from_s3_document_ai(project_location):
         print(f"Error accessing S3 bucket: {e}")
     return "\n".join(pdf_texts)
 
-def process_pdf_with_document_ai(file_content: bytes) -> str:
+def process_pdf_with_document_ai(file_content: bytes, document_ai_client) -> str:
     """Processes a single PDF file content (or a page) using Google Document AI and returns extracted text."""
-    # Instantiates a client
-    document_ai_client = documentai.DocumentProcessorServiceClient()
+   
     # The full resource name of the processor, e.g.:
     # projects/project-id/locations/location/processors/processor-id
     name = document_ai_client.processor_path(
@@ -154,6 +198,10 @@ def process_pdf_with_document_ai(file_content: bytes) -> str:
         result = document_ai_client.process_document(request=request)
         document_object = result.document
         document_text = document_object.text
+        document_pages = document_object.pages
+        for page in document_pages:
+            if page.tables:
+                print(f"Page {page.page_number} has {len(page.tables)} tables.")
         return document_text
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing PDF with Document AI: {e}")
@@ -177,6 +225,7 @@ async def ask_gemini_with_context(request: Request):
         data = await request.json()
         user_query = data.get('query')
         project_location = data.get('location') # Expecting 'location' from the request body for project location
+        print(f"Received user query: {user_query} about project {project_location}", flush=True)
 
         if not user_query:
             raise HTTPException(status_code=400, detail="No query provided")
@@ -189,6 +238,7 @@ async def ask_gemini_with_context(request: Request):
     except HTTPException as http_exc:
         return http_exc
     except Exception as e:
+        print(f"Error processing user query: {e}", flush=True)
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
 
 
