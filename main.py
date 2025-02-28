@@ -11,6 +11,9 @@ import json
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
 import google.oauth2.service_account
+from services.extraction_service import extract_and_chunk
+from services.weaviate_service import get_weaviate_client, insert_document_chunks
+from services.DocumentRecord import DocumentRecord
 
 load_dotenv()
 
@@ -243,5 +246,15 @@ async def ask_gemini_with_context(request: Request):
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, debug=True, reload=True)
+    # Read bytes from a file into a buffer
+    file_path = 'files/1-G0.5ArchSpecs.pdf'
+    with open(file_path, 'rb') as file:
+        file_bytes = file.read()    
+    chunk_list = extract_and_chunk(file_bytes, 0)
+    print(f"Extracted {len(chunk_list)} from pdf")
+    weaviate_client = get_weaviate_client()
+    document = DocumentRecord("1", "G0.5ArchSpecs.pdf", 1, "https://example.com", 1)
+    insert_document_chunks(weaviate_client, document, chunk_list)
+    print("Inserted document chunks")
+    #import uvicorn
+    #uvicorn.run(app, host="0.0.0.0", port=8000, debug=True, reload=True)
