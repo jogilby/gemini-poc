@@ -1,3 +1,8 @@
+import logging
+import sys
+import os
+import json
+from io import BytesIO
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,17 +10,32 @@ from fastapi.staticfiles import StaticFiles
 import boto3
 import google.cloud.documentai_v1 as documentai
 import google.generativeai as genai
-import os
 from dotenv import load_dotenv
-import json
-from io import BytesIO
 from pypdf import PdfReader, PdfWriter
 import google.oauth2.service_account
 from services.extraction_service import extract_and_chunk
-from services.weaviate_service import get_weaviate_client, insert_document_chunks
-from services.DocumentRecord import DocumentRecord
+from services.weaviate_service import create_collections, get_weaviate_client, insert_document_chunks
+from services.ingestion_service import IngestionService
+from database.dao.DocumentRecord import DocumentRecord
+
 
 load_dotenv()
+
+# Setup logging
+def configure_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    # You can set different log levels for different modules
+    logging.getLogger('services.weaviate_service').setLevel(logging.DEBUG)
+    
+    # Return the root logger if needed
+    return logging.getLogger()
 
 app = FastAPI()
 
@@ -246,6 +266,30 @@ async def ask_gemini_with_context(request: Request):
 
 
 if __name__ == "__main__":
+    configure_logging()
+    # Initialize Weaviate collections on first run
+
+    client = get_weaviate_client()
+    create_collections(client, recreate_if_exists=False)
+    print("Weaviate collections initialized successfully.")
+        
+    from database.dbutil import Database  # Adjust the import according to your actual database module
+    from database.dao.DocumentDAO import DocumentDAO
+    from database.dao.UserDAO import UserDAO
+    from database.dao.ProjectDAO import ProjectDAO
+    from services.weaviate_service import get_weaviate_client
+    
+    file_path = 'files/1-G0.5ArchSpecs.pdf'
+    with open(file_path, 'rb') as file:
+        file_bytes = file.read()    
+
+    with ProjectDAO() as prj, DocumentDAO() as doc:      
+        dr = doc.get_document(20)        
+        with IngestionService(get_weaviate_client()) as ingest:
+            ingest.ingest_document(dr, file_bytes, True)
+
+
+    """
     # Read bytes from a file into a buffer
     file_path = 'files/1-G0.5ArchSpecs.pdf'
     with open(file_path, 'rb') as file:
@@ -256,5 +300,6 @@ if __name__ == "__main__":
     document = DocumentRecord("1", "G0.5ArchSpecs.pdf", 1, "https://example.com", 1)
     insert_document_chunks(weaviate_client, document, chunk_list)
     print("Inserted document chunks")
+    """
     #import uvicorn
     #uvicorn.run(app, host="0.0.0.0", port=8000, debug=True, reload=True)

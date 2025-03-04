@@ -11,12 +11,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-# --- ECR Repository ---
-resource "aws_ecr_repository" "app_repo" {
-  name                 = var.ecr_repository_name
-  image_tag_mutability = "MUTABLE"
-}
-
 # --- IAM Roles and Policies ---
 resource "aws_iam_role" "ecs_task_execution_role" {
   name = "ecs-task-execution-role"
@@ -81,19 +75,6 @@ resource "aws_cloudwatch_log_group" "ecs_logs" {
   name              = var.cloudwatch_log_group_name 
   retention_in_days = 30  # Adjust retention period as needed
 }
-
-# --- Secrets Manager ---
-#resource "aws_secretsmanager_secret" "google_service_account_key" {
-#    name = "google-service-account-key-prod" # Or a dynamic name using variables      
-#    force_overwrite_replica_secret = true
-#    recovery_window_in_days        = 0
-#    description = "Google Service Account key for production"
-#}
-
-#resource "aws_secretsmanager_secret_version" "google_service_account_key_version" {
-#      secret_id     = aws_secretsmanager_secret.google_service_account_key.id
-#      secret_string = file("~/Documents/Next/Keys/sa-gemini-poc-0939-key.json")       
-#}
 
 # --- Security Groups ---
 resource "aws_security_group" "alb_sg" {
@@ -195,7 +176,7 @@ resource "aws_ecs_task_definition" "app_task_definition" {
   container_definitions = jsonencode([
     {
       name      = "app-container",
-      image     = "${aws_ecr_repository.app_repo.repository_url}:latest",
+      image     = var.ecr_application_image_url,
       portMappings = [
         {
           containerPort = 80
@@ -211,7 +192,12 @@ resource "aws_ecs_task_definition" "app_task_definition" {
         { name = "GOOGLE_CLOUD_PROJECT_ID", value = var.google_cloud_project_id },
         { name = "GOOGLE_DOCUMENT_AI_PROCESSOR_ID", value = var.google_document_ai_processor_id },
         { name = "GOOGLE_DOCUMENT_AI_PROCESSOR_LOCATION", value = var.google_document_ai_processor_location },
-        { name = "GOOGLE_SERVICE_ACCOUNT_SECRET_NAME", value = var.google_service_account_secret_name }
+        { name = "GOOGLE_SERVICE_ACCOUNT_SECRET_NAME", value = var.google_service_account_secret_name },
+        { name = "RDS_DB_HOST", value = var.rds_db_host },
+        { name = "RDS_DB_NAME", value = var.rds_db_name },
+        { name = "RDS_DB_USER", value = var.rds_db_user },
+        { name = "RDS_DB_PASSWORD", value = var.rds_db_password },
+        { name = "RDS_DB_PORT", value = var.rds_db_port },
       ],
       logConfiguration = { 
         logDriver = "awslogs"

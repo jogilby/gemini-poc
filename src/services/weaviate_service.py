@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from weaviate.classes.init import Auth
 from weaviate.classes.query import Filter
 from weaviate.classes.config import Configure, Property, DataType
-from services.DocumentRecord import DocumentRecord
+from database.dao.DocumentRecord import DocumentRecord
 
 """ This service is responsible for connecting to Weaviate and managing the data in the Document collection."""
 
@@ -43,7 +43,7 @@ def create_collections(client, recreate_if_exists=False):
     # Create the collection    
     client.collections.create(collection_name, 
                             properties=[Property(name="project_id", data_type=DataType.INT),
-                                        Property(name="file_id", data_type=DataType.TEXT),
+                                        Property(name="document_id", data_type=DataType.INT),
                                         Property(name="file_name", data_type=DataType.TEXT),
                                         Property(name="source_url", data_type=DataType.TEXT),
                                         Property(name="source_page", data_type=DataType.INT),
@@ -58,8 +58,7 @@ def create_collections(client, recreate_if_exists=False):
     )
     return
     
-
-def insert_document_chunks(client, document: DocumentRecord, chunks):
+def insert_document_chunks(client, document_record: DocumentRecord, chunks):
     """
     Connect to Weaviate and insert records for file content chunks. This will always insert and
     does not check for existence.
@@ -83,11 +82,11 @@ def insert_document_chunks(client, document: DocumentRecord, chunks):
     # Insert the records
     with documents.batch.dynamic() as batch:
         for chunk in chunks:
-            batch.add_object({"file_id": document.file_id, 
-                                "file_name": document.file_name, 
-                                "project_id": document.project_id,
-                                "source_url": document.source_url,
-                                "source_page": document.source_page,
+            batch.add_object({"document_id": document_record.document_id, 
+                                "file_name": document_record.file_name, 
+                                "project_id": document_record.project_id,
+                                "source_url": document_record.source_url,
+                                "source_page": document_record.source_page,
                                 "contents": chunk})
             if batch.number_errors > 10:
                 print("Batch import stopped due to excessive errors.")
@@ -98,17 +97,17 @@ def insert_document_chunks(client, document: DocumentRecord, chunks):
             print(f"Number of failed imports: {len(failed_objects)}")
             print(f"First failed object: {failed_objects[0]}")
         else:    
-            print(f"Inserting record with file_id: {document.file_id}")
+            print(f"Inserting record with document_id: {document_record.document_id}")
     
     return True
 
-def remove_document(client, file_id):
+def remove_document_chunks(client, document_id: int):
     """
-    Remove a document from Weaviate.
+    Remove all chunks for a document from Weaviate.
     """
     documents = client.collections.get("Document")
     documents.data.delete_many(
-        where=Filter.by_property("file_id").equal(file_id)
+        where=Filter.by_property("document_id").equal(document_id)
     )
     return
     

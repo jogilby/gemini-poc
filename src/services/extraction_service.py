@@ -68,7 +68,7 @@ try:
         print("Warning: google-service-account-key-prod secret not parsed. Falling back to default credentials.")
 except Exception as e:
     print(f"Error loading Google Service Account key: {e}")
-    raise e  
+    print("Exception loading google service account, will try default credentials")
 
 
 def extract_and_chunk(pdf_file_bytes, chunk_len=0, use_document_ai=False) -> list:

@@ -1,6 +1,6 @@
 class DocumentRecord:
-    def __init__(self, file_id: str, file_name: str, project_id: int, source_url: str, source_page: int):        
-        self.file_id = file_id
+    def __init__(self, document_id: int, file_name: str, project_id: int, source_url: str, source_page: int):        
+        self.document_id = document_id
         self.file_name = file_name
         self.project_id = project_id
         self.source_url = source_url
@@ -8,12 +8,12 @@ class DocumentRecord:
         self.chunks = []
 
     @property
-    def file_id(self):
-        return self._file_id
+    def document_id(self):
+        return self._document_id
 
-    @file_id.setter
-    def file_id(self, value):
-        self._file_id = value
+    @document_id.setter
+    def document_id(self, value):
+        self._document_id = value
 
     @property
     def file_name(self):

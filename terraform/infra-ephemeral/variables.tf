@@ -19,12 +19,6 @@ variable "private_subnet_ids" {
   description = "List of private subnet IDs for ECS tasks"
 }
 
-variable "ecr_repository_name" {
-  type        = string
-  description = "Name for the ECR repository"
-  default     = "fastapi-app-repo"
-}
-
 variable "ecs_cluster_name" {
   type        = string
   description = "Name for the ECS cluster"
@@ -35,6 +29,11 @@ variable "ecs_task_family" {
   type        = string
   description = "Family name for the ECS task definition"
   default     = "fastapi-app-task"
+}
+
+variable "ecr_application_image_url" {
+  type = string
+  description = "ECR repository URL for application image"
 }
 
 variable "alb_name" {
@@ -121,4 +120,31 @@ variable "cloudwatch_log_group_name" {
   type        = string
   description = "Name of the CloudWatch Log Group for ECS Task logs"
   default     = "gemini-poc-app" # Default log group name
+} 
+
+# --- RDS DB Environment Variables ---
+variable "rds_db_host" {
+  type        = string
+  description = "RDS db host (from rds_endpoint output)"  
+}
+
+variable "rds_db_name" {
+  type        = string
+  description = "RDS database name"  
+}
+
+variable "rds_db_user" {
+  type        = string
+  description = "RDS admin user name"
+  default     = "admin"
+}
+
+variable "rds_db_password" {
+  type        = string
+  description = "RDS admin user password"  
+}
+
+variable "rds_db_port" {
+  type        = string
+  description = "RDS db port (from rds_endpoint output)"  
 }
